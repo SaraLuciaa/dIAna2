@@ -33,7 +33,9 @@ async function buildAgentContextForTask(
 ) {
   const { data: profile } = await db
     .from("profiles")
-    .select("agent_system_prompt")
+    .select(
+      "agent_system_prompt, timezone, language, default_google_calendar_id"
+    )
     .eq("id", userId)
     .single();
 
@@ -81,8 +83,14 @@ async function buildAgentContextForTask(
       scopes: (i.scopes as string[]) ?? [],
       status: i.status as "active" | "revoked" | "expired",
       created_at: i.created_at as string,
+      account_email: i.account_email as string | undefined,
     })) as UserIntegration[],
     githubToken,
+    // Intentionally no googleAccessToken: cron runs unattended; Calendar mutations must not auto-execute.
+    defaultGoogleCalendarId:
+      (profile?.default_google_calendar_id as string | null | undefined) ?? null,
+    userTimezone: (profile?.timezone as string) ?? "UTC",
+    userLanguage: (profile?.language as string) ?? "es",
   };
 }
 

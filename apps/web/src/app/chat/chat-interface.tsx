@@ -8,6 +8,9 @@ interface PendingConfirmation {
   tool_name: string;
   message: string;
   args: Record<string, unknown>;
+  provider?: "google_calendar";
+  action?: string;
+  payload?: Record<string, unknown>;
 }
 
 interface Message {
@@ -54,6 +57,9 @@ function buildInitialMessages(
           tool_name: sp.tool_name as string,
           message: sp.message as string,
           args: sp.args as Record<string, unknown>,
+          provider: sp.provider as PendingConfirmation["provider"],
+          action: sp.action as string | undefined,
+          payload: sp.payload as Record<string, unknown> | undefined,
         },
         // Will be set to "pending" below if it matches the still-unresolved call
         confirmationStatus: "approved",
@@ -356,6 +362,18 @@ export function ChatInterface({
                   }`}
                 >
                   <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {msg.confirmation?.provider === "google_calendar" &&
+                    msg.confirmation.payload &&
+                    msg.confirmationStatus === "pending" && (
+                      <div className="mt-2 rounded-md border border-neutral-200 bg-white/80 p-2 text-xs dark:border-neutral-600 dark:bg-neutral-900/50">
+                        <p className="font-medium text-neutral-700 dark:text-neutral-200">
+                          Google Calendar — {msg.confirmation.action}
+                        </p>
+                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-neutral-600 dark:text-neutral-400">
+                          {JSON.stringify(msg.confirmation.payload, null, 2)}
+                        </pre>
+                      </div>
+                    )}
                   {msg.confirmation && msg.confirmationStatus === "pending" && (
                     <div className="mt-3 flex gap-2">
                       <button

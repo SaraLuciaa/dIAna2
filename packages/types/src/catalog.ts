@@ -91,6 +91,161 @@ export const TOOL_CATALOG: ToolDefinition[] = [
     displayDescription: "Crea un repositorio nuevo en GitHub (requiere confirmación).",
   },
   {
+    id: "google_calendar_list_calendars",
+    name: "google_calendar_list_calendars",
+    description:
+      "Lists the user's Google calendars (id, summary, primary, timeZone). Use before creating events if you need a specific calendar id.",
+    risk: "low",
+    requires_integration: "google",
+    parameters_schema: { type: "object", properties: {}, required: [] },
+    displayName: "Google Calendar: listar calendarios",
+    displayDescription: "Lista calendarios accesibles de la cuenta conectada.",
+  },
+  {
+    id: "google_calendar_set_primary",
+    name: "google_calendar_set_primary",
+    description:
+      "Sets the user's preferred default Google calendar id for subsequent list/create operations (stored in profile, not on Google servers).",
+    risk: "low",
+    requires_integration: "google",
+    parameters_schema: {
+      type: "object",
+      properties: {
+        calendar_id: { type: "string", description: "Calendar id from list_calendars (e.g. primary or email group)" },
+      },
+      required: ["calendar_id"],
+    },
+    displayName: "Google Calendar: calendario por defecto",
+    displayDescription: "Guarda el calendario preferido para el agente.",
+  },
+  {
+    id: "google_calendar_list_events",
+    name: "google_calendar_list_events",
+    description:
+      "Lists events in a calendar. Pass timeMin/timeMax as RFC3339 (with offset) for a range; omit for Google's default window. Uses profile default calendar when calendar_id omitted.",
+    risk: "low",
+    requires_integration: "google",
+    parameters_schema: {
+      type: "object",
+      properties: {
+        calendar_id: { type: "string", description: "Optional calendar id; defaults to profile primary or 'primary'" },
+        time_min: { type: "string", description: "RFC3339 lower bound e.g. 2026-04-27T00:00:00-05:00" },
+        time_max: { type: "string", description: "RFC3339 upper bound" },
+        max_results: { type: "number", description: "Max events (default 50, max 250)" },
+      },
+      required: [],
+    },
+    displayName: "Google Calendar: listar eventos",
+    displayDescription: "Lista eventos en un rango de fechas o ventana por defecto.",
+  },
+  {
+    id: "google_calendar_freebusy",
+    name: "google_calendar_freebusy",
+    description:
+      "Queries Google Calendar FreeBusy API for busy intervals across one or more calendars between timeMin and timeMax (RFC3339).",
+    risk: "low",
+    requires_integration: "google",
+    parameters_schema: {
+      type: "object",
+      properties: {
+        calendar_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Calendar ids to query",
+        },
+        time_min: { type: "string", description: "RFC3339" },
+        time_max: { type: "string", description: "RFC3339" },
+      },
+      required: ["calendar_ids", "time_min", "time_max"],
+    },
+    displayName: "Google Calendar: FreeBusy",
+    displayDescription: "Consulta bloques ocupados en uno o más calendarios.",
+  },
+  {
+    id: "google_calendar_availability",
+    name: "google_calendar_availability",
+    description:
+      "Computes free time slots (minimum length slot_minutes) within time_min/time_max using FreeBusy. If calendar_ids omitted, uses default calendar.",
+    risk: "low",
+    requires_integration: "google",
+    parameters_schema: {
+      type: "object",
+      properties: {
+        calendar_ids: { type: "array", items: { type: "string" } },
+        time_min: { type: "string", description: "RFC3339" },
+        time_max: { type: "string", description: "RFC3339" },
+        slot_minutes: { type: "number", description: "Minimum free slot length in minutes (default 30)" },
+      },
+      required: ["time_min", "time_max"],
+    },
+    displayName: "Google Calendar: disponibilidad",
+    displayDescription: "Calcula huecos libres a partir de FreeBusy.",
+  },
+  {
+    id: "google_calendar_create_event",
+    name: "google_calendar_create_event",
+    description:
+      "Creates a real Google Calendar event. start/end must be objects: either { dateTime, timeZone } or { date } for all-day. Optional attendees (emails), add_google_meet for Meet link. Requires human confirmation.",
+    risk: "high",
+    requires_integration: "google",
+    parameters_schema: {
+      type: "object",
+      properties: {
+        calendar_id: { type: "string" },
+        summary: { type: "string" },
+        description: { type: "string" },
+        start: { type: "object", description: "{ dateTime, timeZone } or { date }" },
+        end: { type: "object", description: "{ dateTime, timeZone } or { date }" },
+        attendees: { type: "array", items: { type: "string" } },
+        add_google_meet: { type: "boolean" },
+      },
+      required: ["summary", "start", "end"],
+    },
+    displayName: "Google Calendar: crear evento",
+    displayDescription: "Crea un evento (requiere confirmación).",
+  },
+  {
+    id: "google_calendar_update_event",
+    name: "google_calendar_update_event",
+    description:
+      "Updates an existing calendar event by id (PATCH). Optional add_google_meet adds Meet if missing. Requires human confirmation.",
+    risk: "high",
+    requires_integration: "google",
+    parameters_schema: {
+      type: "object",
+      properties: {
+        calendar_id: { type: "string" },
+        event_id: { type: "string" },
+        summary: { type: "string" },
+        description: { type: "string" },
+        start: { type: "object" },
+        end: { type: "object" },
+        attendees: { type: "array", items: { type: "string" } },
+        add_google_meet: { type: "boolean" },
+      },
+      required: ["event_id"],
+    },
+    displayName: "Google Calendar: actualizar evento",
+    displayDescription: "Modifica un evento existente (requiere confirmación).",
+  },
+  {
+    id: "google_calendar_delete_event",
+    name: "google_calendar_delete_event",
+    description: "Deletes a calendar event by id. Requires human confirmation.",
+    risk: "high",
+    requires_integration: "google",
+    parameters_schema: {
+      type: "object",
+      properties: {
+        calendar_id: { type: "string" },
+        event_id: { type: "string" },
+      },
+      required: ["event_id"],
+    },
+    displayName: "Google Calendar: eliminar evento",
+    displayDescription: "Elimina un evento (requiere confirmación).",
+  },
+  {
     id: "read_file",
     name: "read_file",
     description:

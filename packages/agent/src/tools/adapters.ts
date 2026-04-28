@@ -7,6 +7,15 @@ import { TOOL_SCHEMAS } from "./schemas";
 import { withTracking } from "./withTracking";
 import { executeBash } from "./bashExec";
 import { executeReadFile, executeWriteFile, executeEditFile } from "./fileTools";
+import { listCalendars } from "./googleCalendar/listCalendars";
+import { listEvents } from "./googleCalendar/listEvents";
+import { queryFreeBusy } from "./googleCalendar/freeBusy";
+import { computeAvailability } from "./googleCalendar/availability";
+import { createCalendarEvent } from "./googleCalendar/createEvent";
+import { updateCalendarEvent } from "./googleCalendar/updateEvent";
+import { deleteCalendarEvent } from "./googleCalendar/deleteEvent";
+import type { CreateEventInput } from "./googleCalendar/createEvent";
+import type { UpdateEventInput } from "./googleCalendar/updateEvent";
 
 const GITHUB_API = "https://api.github.com";
 const GITHUB_UA = "10x-builders-agent/1.0";
@@ -18,6 +27,19 @@ export interface ToolContext {
   enabledTools: UserToolSetting[];
   integrations: UserIntegration[];
   githubToken?: string;
+  googleAccessToken?: string;
+  defaultGoogleCalendarId?: string | null;
+  userTimezone: string;
+  userLanguage: string;
+}
+
+function requireGoogleToken(ctx: ToolContext): string {
+  if (!ctx.googleAccessToken) {
+    throw new Error(
+      "Google Calendar no está conectado. Conecta tu cuenta en Ajustes o vuelve a autorizar la integración."
+    );
+  }
+  return ctx.googleAccessToken;
 }
 
 function isToolAvailable(toolId: string, ctx: ToolContext): boolean {
@@ -143,6 +165,7 @@ export const TOOL_HANDLERS: ToolHandlers = {
       timezone: profile.timezone,
       language: profile.language,
       agent_name: profile.agent_name,
+      default_google_calendar_id: profile.default_google_calendar_id ?? null,
     };
   },
 
@@ -162,6 +185,137 @@ export const TOOL_HANDLERS: ToolHandlers = {
 
   github_create_repo: async (input, ctx) =>
     executeGitHubTool("github_create_repo", input, ctx.githubToken!),
+
+  google_calendar_list_calendars: async (_input, ctx) => {
+    const token = requireGoogleToken(ctx);
+    return listCalendars(token);
+  },
+
+  google_calendar_set_primary: async (input: { calendar_id: string }, ctx) => {
+    const { setDefaultGoogleCalendarId } = await import("@agents/db");
+    await setDefaultGoogleCalendarId(ctx.db, ctx.userId, input.calendar_id);
+    return {
+      ok: true,
+      default_google_calendar_id: input.calendar_id,
+      message: "Calendario por defecto actualizado para el agente.",
+    };
+  },
+
+  google_calendar_list_events: async (
+    input: {
+      calendar_id?: string;
+      time_min?: string;
+      time_max?: string;
+      max_results?: number;
+    },
+    ctx
+  ) => {
+    const token = requireGoogleToken(ctx);
+    return listEvents(token, {
+      calendarId: input.calendar_id,
+      defaultCalendarId: ctx.defaultGoogleCalendarId,
+      timeMin: input.time_min,
+      timeMax: input.time_max,
+      maxResults: input.max_results,
+    });
+  },
+
+  google_calendar_freebusy: async (
+    input: { calendar_ids: string[]; time_min: string; time_max: string },
+    ctx
+  ) => {
+    const token = requireGoogleToken(ctx);
+    return queryFreeBusy(token, {
+      calendarIds: input.calendar_ids,
+      timeMin: input.time_min,
+      timeMax: input.time_max,
+    });
+  },
+
+  google_calendar_availability: async (
+    input: {
+      calendar_ids?: string[];
+      time_min: string;
+      time_max: string;
+      slot_minutes?: number;
+    },
+    ctx
+  ) => {
+    const token = requireGoogleToken(ctx);
+    return computeAvailability(token, {
+      calendarIds: input.calendar_ids,
+      defaultCalendarId: ctx.defaultGoogleCalendarId,
+      timeMin: input.time_min,
+      timeMax: input.time_max,
+      slotMinutes: input.slot_minutes,
+    });
+  },
+
+  google_calendar_create_event: async (
+    input: {
+      calendar_id?: string;
+      summary: string;
+      description?: string;
+      start: Record<string, unknown>;
+      end: Record<string, unknown>;
+      attendees?: string[];
+      add_google_meet?: boolean;
+    },
+    ctx
+  ) => {
+    const token = requireGoogleToken(ctx);
+    const body: CreateEventInput = {
+      calendarId: input.calendar_id,
+      defaultCalendarId: ctx.defaultGoogleCalendarId,
+      summary: input.summary,
+      description: input.description,
+      start: input.start as CreateEventInput["start"],
+      end: input.end as CreateEventInput["end"],
+      attendees: input.attendees,
+      add_google_meet: input.add_google_meet,
+    };
+    return createCalendarEvent(token, body);
+  },
+
+  google_calendar_update_event: async (
+    input: {
+      calendar_id?: string;
+      event_id: string;
+      summary?: string;
+      description?: string;
+      start?: Record<string, unknown>;
+      end?: Record<string, unknown>;
+      attendees?: string[];
+      add_google_meet?: boolean;
+    },
+    ctx
+  ) => {
+    const token = requireGoogleToken(ctx);
+    const body: UpdateEventInput = {
+      calendarId: input.calendar_id,
+      defaultCalendarId: ctx.defaultGoogleCalendarId,
+      eventId: input.event_id,
+      summary: input.summary,
+      description: input.description,
+      attendees: input.attendees,
+      add_google_meet: input.add_google_meet,
+    };
+    if (input.start) body.start = input.start as UpdateEventInput["start"];
+    if (input.end) body.end = input.end as UpdateEventInput["end"];
+    return updateCalendarEvent(token, body);
+  },
+
+  google_calendar_delete_event: async (
+    input: { calendar_id?: string; event_id: string },
+    ctx
+  ) => {
+    const token = requireGoogleToken(ctx);
+    return deleteCalendarEvent(token, {
+      calendarId: input.calendar_id,
+      defaultCalendarId: ctx.defaultGoogleCalendarId,
+      eventId: input.event_id,
+    });
+  },
 
   read_file: async (input: { path: string; offset?: number; limit?: number }) => {
     const result = await executeReadFile(input);

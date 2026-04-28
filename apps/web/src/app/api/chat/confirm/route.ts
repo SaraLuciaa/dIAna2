@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createServerClient, getPendingToolCall, decrypt } from "@agents/db";
+import {
+  createServerClient,
+  getPendingToolCall,
+  decrypt,
+  getValidGoogleAccessToken,
+} from "@agents/db";
 import { runAgent } from "@agents/agent";
 
 export async function POST(request: Request) {
@@ -42,7 +47,9 @@ export async function POST(request: Request) {
     // Load user context needed to reconstruct the agent
     const { data: profile } = await supabase
       .from("profiles")
-      .select("agent_system_prompt")
+      .select(
+        "agent_system_prompt, timezone, language, default_google_calendar_id"
+      )
       .eq("id", user.id)
       .single();
 
@@ -69,6 +76,14 @@ export async function POST(request: Request) {
       }
     }
 
+    let googleAccessToken: string | undefined;
+    try {
+      const g = await getValidGoogleAccessToken(db, user.id);
+      if (g) googleAccessToken = g;
+    } catch {
+      /* ignore */
+    }
+
     // Resume the interrupted LangGraph with the human decision
     const result = await runAgent({
       resumeDecision: action as "approve" | "reject",
@@ -90,8 +105,14 @@ export async function POST(request: Request) {
         scopes: (i.scopes as string[]) ?? [],
         status: i.status as "active" | "revoked" | "expired",
         created_at: i.created_at as string,
+        account_email: i.account_email as string | undefined,
       })),
       githubToken,
+      googleAccessToken,
+      defaultGoogleCalendarId:
+        (profile?.default_google_calendar_id as string | null | undefined) ?? null,
+      userTimezone: (profile?.timezone as string) ?? "UTC",
+      userLanguage: (profile?.language as string) ?? "es",
     });
 
     return NextResponse.json({

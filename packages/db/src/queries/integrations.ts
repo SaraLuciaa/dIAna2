@@ -16,20 +16,23 @@ export async function upsertIntegration(
   userId: string,
   provider: string,
   scopes: string[],
-  encryptedTokens: string
+  encryptedTokens: string,
+  accountEmail?: string | null
 ) {
+  const row: Record<string, unknown> = {
+    user_id: userId,
+    provider,
+    scopes,
+    encrypted_tokens: encryptedTokens,
+    status: "active",
+  };
+  if (accountEmail !== undefined) {
+    row.account_email = accountEmail;
+  }
+
   const { data, error } = await db
     .from("user_integrations")
-    .upsert(
-      {
-        user_id: userId,
-        provider,
-        scopes,
-        encrypted_tokens: encryptedTokens,
-        status: "active",
-      },
-      { onConflict: "user_id,provider" }
-    )
+    .upsert(row, { onConflict: "user_id,provider" })
     .select()
     .single();
   if (error) throw error;

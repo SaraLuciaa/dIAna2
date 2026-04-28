@@ -12,6 +12,8 @@ export interface Profile {
   agent_name: string;
   agent_system_prompt: string;
   onboarding_completed: boolean;
+  /** Preferred Google Calendar id for agent tools; null uses primary calendar. */
+  default_google_calendar_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -22,6 +24,8 @@ export interface UserIntegration {
   provider: string;
   scopes: string[];
   status: "active" | "revoked" | "expired";
+  /** Google account email from userinfo (Settings UI only). */
+  account_email?: string | null;
   created_at: string;
 }
 
@@ -93,6 +97,10 @@ export interface PendingConfirmation {
   tool_name: string;
   message: string;
   args: Record<string, unknown>;
+  /** Structured UI payload (e.g. Google Calendar actions). */
+  provider?: "google_calendar";
+  action?: string;
+  payload?: Record<string, unknown>;
 }
 
 export type ScheduleType = "one_time" | "recurring";

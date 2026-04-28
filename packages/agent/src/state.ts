@@ -15,6 +15,14 @@ export const GraphState = Annotation.Root({
   sessionId: Annotation<string>(),
   userId: Annotation<string>(),
   systemPrompt: Annotation<string>(),
+  userTimezone: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "UTC",
+  }),
+  userLanguage: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "es",
+  }),
   /**
    * Consecutive compaction failure counter for the circuit breaker.
    * Reducer is last-write-wins — callers set it explicitly each time.

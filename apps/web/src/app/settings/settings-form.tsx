@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { TOOL_CATALOG } from "@agents/types";
@@ -11,9 +11,17 @@ interface Props {
   toolSettings: Array<{ tool_id: string; enabled: boolean }>;
   telegramLinked: boolean;
   githubConnected: boolean;
+  googleIntegration: Record<string, unknown> | null;
 }
 
-export function SettingsForm({ userId, profile, toolSettings, telegramLinked, githubConnected }: Props) {
+export function SettingsForm({
+  userId,
+  profile,
+  toolSettings,
+  telegramLinked,
+  githubConnected,
+  googleIntegration,
+}: Props) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -21,6 +29,8 @@ export function SettingsForm({ userId, profile, toolSettings, telegramLinked, gi
     githubConnected ? "connected" : "disconnected"
   );
   const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
+  const [googleBanner, setGoogleBanner] = useState<string | null>(null);
 
   const [name, setName] = useState((profile?.name as string) ?? "");
   const [agentName, setAgentName] = useState((profile?.agent_name as string) ?? "Agente");
@@ -36,6 +46,23 @@ export function SettingsForm({ userId, profile, toolSettings, telegramLinked, gi
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
+
+  const googleStatus = googleIntegration?.status as string | undefined;
+  const googleActive = googleStatus === "active";
+  const googleNeedsReconnect =
+    googleStatus === "expired" || googleStatus === "revoked";
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("google") === "connected") {
+      setGoogleBanner("Google Calendar conectado correctamente.");
+      router.replace("/settings");
+    } else if (params.get("google") === "error") {
+      const reason = params.get("reason") ?? "unknown";
+      setGoogleBanner(`Error al conectar Google: ${reason}`);
+      router.replace("/settings");
+    }
+  }, [router]);
 
   function toggleTool(id: string) {
     setEnabledTools((prev) =>
@@ -69,6 +96,16 @@ export function SettingsForm({ userId, profile, toolSettings, telegramLinked, gi
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
     router.refresh();
+  }
+
+  async function handleDisconnectGoogle() {
+    setDisconnectingGoogle(true);
+    try {
+      const res = await fetch("/api/integrations/google/disconnect", { method: "POST" });
+      if (res.ok) router.refresh();
+    } finally {
+      setDisconnectingGoogle(false);
+    }
   }
 
   async function handleDisconnectGithub() {
@@ -155,6 +192,92 @@ export function SettingsForm({ userId, profile, toolSettings, telegramLinked, gi
             </label>
           ))}
         </div>
+      </section>
+
+      {googleBanner && (
+        <div
+          className={`rounded-md border px-3 py-2 text-sm ${
+            googleBanner.startsWith("Error")
+              ? "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200"
+              : "border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900/20 dark:text-green-200"
+          }`}
+        >
+          {googleBanner}
+        </div>
+      )}
+
+      {/* Google Calendar */}
+      <section className="space-y-4">
+        <h2 className="text-base font-semibold">Google Calendar / Workspace</h2>
+        {googleActive ? (
+          <div className="space-y-3 rounded-md border border-neutral-200 p-4 dark:border-neutral-800">
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+              <span className="text-sm font-medium text-green-700 dark:text-green-400">Conectado</span>
+            </div>
+            {typeof googleIntegration?.account_email === "string" &&
+              googleIntegration.account_email.length > 0 && (
+              <p className="text-sm text-neutral-600 dark:text-neutral-300">
+                Cuenta:{" "}
+                <span className="font-mono">{googleIntegration.account_email}</span>
+              </p>
+            )}
+            {Array.isArray(googleIntegration?.scopes) && (googleIntegration.scopes as string[]).length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-neutral-500">Permisos concedidos</p>
+                <ul className="mt-1 list-inside list-disc text-xs text-neutral-600 dark:text-neutral-400">
+                  {(googleIntegration.scopes as string[]).map((s) => (
+                    <li key={s} className="break-all">
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <a
+                href="/api/integrations/google"
+                className="inline-block rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-900"
+              >
+                Reconectar permisos
+              </a>
+              <button
+                type="button"
+                onClick={handleDisconnectGoogle}
+                disabled={disconnectingGoogle}
+                className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
+              >
+                {disconnectingGoogle ? "Desconectando..." : "Desconectar"}
+              </button>
+            </div>
+          </div>
+        ) : googleNeedsReconnect && googleIntegration ? (
+          <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20">
+            <p className="text-sm text-amber-900 dark:text-amber-100">
+              La integración con Google ya no es válida (permisos revocados o token expirado). Vuelve a
+              conectar.
+            </p>
+            <a
+              href="/api/integrations/google"
+              className="inline-block rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+            >
+              Reconectar Google
+            </a>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-sm text-neutral-500">
+              Conecta tu cuenta de Google para que el agente consulte y gestione tu calendario real (con
+              confirmación para cambios).
+            </p>
+            <a
+              href="/api/integrations/google"
+              className="inline-block rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+            >
+              Conectar Google Calendar
+            </a>
+          </div>
+        )}
       </section>
 
       {/* GitHub */}

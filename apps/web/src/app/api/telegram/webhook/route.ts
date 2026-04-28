@@ -3,6 +3,7 @@ import {
   createServerClient,
   decrypt,
   getPendingToolCall,
+  getValidGoogleAccessToken,
 } from "@agents/db";
 import { runAgent } from "@agents/agent";
 import { sendTelegramMessage } from "@/lib/telegram/send";
@@ -72,7 +73,9 @@ async function buildAgentContext(
 ) {
   const { data: profile } = await db
     .from("profiles")
-    .select("agent_system_prompt")
+    .select(
+      "agent_system_prompt, timezone, language, default_google_calendar_id"
+    )
     .eq("id", userId)
     .single();
 
@@ -88,6 +91,14 @@ async function buildAgentContext(
     .eq("status", "active");
 
   const githubToken = await resolveGitHubToken(db, userId);
+
+  let googleAccessToken: string | undefined;
+  try {
+    const g = await getValidGoogleAccessToken(db, userId);
+    if (g) googleAccessToken = g;
+  } catch {
+    /* ignore */
+  }
 
   return {
     userId,
@@ -108,8 +119,14 @@ async function buildAgentContext(
       scopes: (i.scopes as string[]) ?? [],
       status: i.status as "active" | "revoked" | "expired",
       created_at: i.created_at as string,
+      account_email: i.account_email as string | undefined,
     })),
     githubToken,
+    googleAccessToken,
+    defaultGoogleCalendarId:
+      (profile?.default_google_calendar_id as string | null | undefined) ?? null,
+    userTimezone: (profile?.timezone as string) ?? "UTC",
+    userLanguage: (profile?.language as string) ?? "es",
   };
 }
 

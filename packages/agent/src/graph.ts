@@ -33,6 +33,7 @@ import { GraphState } from "./state";
 import { compactionNode } from "./nodes/compaction_node";
 import { createMemoryInjectionNode } from "./nodes/memory_injection_node";
 import { createLangfuseRunnableConfig } from "./langfuse";
+import { googleCalendarConfirmationExtras } from "./tools/googleCalendar/confirmationPayload";
 
 
 export interface AgentInput {
@@ -45,6 +46,11 @@ export interface AgentInput {
   enabledTools: UserToolSetting[];
   integrations: UserIntegration[];
   githubToken?: string;
+  /** Resolved OAuth access token only; never refresh_token. */
+  googleAccessToken?: string;
+  defaultGoogleCalendarId?: string | null;
+  userTimezone?: string;
+  userLanguage?: string;
   /** Skip HITL interrupts and auto-approve all tool calls. Use only for unattended runs (e.g. cron). */
   bypassConfirmation?: boolean;
 }
@@ -93,6 +99,18 @@ function buildConfirmationMessage(
           : `con expresión cron "${args.cron_expr}"`;
       return `Se requiere confirmación para programar una tarea (${schedType}) ${when}.\n\nPrompt: "${args.prompt}"`;
     }
+    case "google_calendar_create_event": {
+      const meet = args.add_google_meet ? " (con Google Meet)" : "";
+      const inv =
+        Array.isArray(args.attendees) && (args.attendees as string[]).length
+          ? `\nInvitados: ${(args.attendees as string[]).join(", ")}`
+          : "";
+      return `Se requiere confirmación para crear un evento en Google Calendar${meet}: "${args.summary}"${inv}\n\nInicio / fin: ${JSON.stringify(args.start)} — ${JSON.stringify(args.end)}`;
+    }
+    case "google_calendar_update_event":
+      return `Se requiere confirmación para actualizar el evento "${args.eventId}" del calendario. Cambios: ${JSON.stringify({ summary: args.summary, start: args.start, end: args.end, attendees: args.attendees, add_google_meet: args.add_google_meet })}`;
+    case "google_calendar_delete_event":
+      return `Se requiere confirmación para **eliminar** el evento "${args.eventId}" del calendario. Esta acción no se puede deshacer desde el asistente.`;
     default:
       return `Se requiere confirmación para ejecutar "${toolId}" (riesgo: ${getToolRisk(toolId)}).`;
   }
@@ -111,11 +129,26 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
     enabledTools,
     integrations,
     githubToken,
+    googleAccessToken,
+    defaultGoogleCalendarId,
+    userTimezone = "UTC",
+    userLanguage = "es",
     bypassConfirmation = false,
   } = input;
 
   const model = createChatModel();
-  const toolCtx: ToolContext = { db, userId, sessionId, enabledTools, integrations, githubToken };
+  const toolCtx: ToolContext = {
+    db,
+    userId,
+    sessionId,
+    enabledTools,
+    integrations,
+    githubToken,
+    googleAccessToken,
+    defaultGoogleCalendarId: defaultGoogleCalendarId ?? null,
+    userTimezone,
+    userLanguage,
+  };
   const lcTools = buildLangChainTools(toolCtx);
 
   const modelWithTools = lcTools.length > 0 ? model.bindTools(lcTools) : model;
@@ -126,8 +159,10 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
     state: typeof GraphState.State,
     config?: RunnableConfig
   ): Promise<Partial<typeof GraphState.State>> {
-    const currentDate = new Date().toLocaleString("es", {
-      timeZone: "America/Bogota",
+    const tz = state.userTimezone ?? "UTC";
+    const loc = state.userLanguage ?? "es";
+    const currentDate = new Date().toLocaleString(loc, {
+      timeZone: tz,
       weekday: "long",
       year: "numeric",
       month: "long",
@@ -135,7 +170,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
       hour: "2-digit",
       minute: "2-digit",
     });
-    const systemPromptWithDate = `${state.systemPrompt}\n\nFecha y hora actual: ${currentDate} (hora Colombia).`;
+    const systemPromptWithDate = `${state.systemPrompt}\n\nFecha y hora actual: ${currentDate} (zona horaria IANA del usuario: ${tz}). Para eventos de Google Calendar usa siempre dateTime con timeZone explícita (p. ej. America/Bogota), no asumas UTC.`;
 
     // Inject SystemMessage fresh so it is never accumulated in state.messages.
     const response = await modelWithTools.invoke(
@@ -190,6 +225,10 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
         }
 
         const confirmMsg = buildConfirmationMessage(toolId, tc.args as Record<string, unknown>);
+        const googleExtras = googleCalendarConfirmationExtras(
+          toolId,
+          tc.args as Record<string, unknown>
+        );
 
         // interrupt() pauses graph execution here on first pass.
         // On resume, it returns the decision value immediately.
@@ -198,6 +237,7 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
           tool_name: toolId,
           message: confirmMsg,
           args: tc.args,
+          ...googleExtras,
         }) as "approve" | "reject";
 
         if (decision !== "approve") {
@@ -322,7 +362,14 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
     await addMessage(db, sessionId, "user", message!);
 
     finalState = await app.invoke(
-      { messages: [new HumanMessage(message!)], sessionId, userId, systemPrompt },
+      {
+        messages: [new HumanMessage(message!)],
+        sessionId,
+        userId,
+        systemPrompt,
+        userTimezone: userTimezone ?? "UTC",
+        userLanguage: userLanguage ?? "es",
+      },
       config
     );
   }
@@ -338,6 +385,9 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
       tool_name: string;
       message: string;
       args: Record<string, unknown>;
+      provider?: "google_calendar";
+      action?: string;
+      payload?: Record<string, unknown>;
     };
 
     const pendingConfirmation: PendingConfirmation = {
@@ -345,6 +395,9 @@ export async function runAgent(input: AgentInput): Promise<AgentOutput> {
       tool_name: interruptValue.tool_name,
       message: interruptValue.message,
       args: interruptValue.args,
+      ...(interruptValue.provider ? { provider: interruptValue.provider } : {}),
+      ...(interruptValue.action ? { action: interruptValue.action } : {}),
+      ...(interruptValue.payload ? { payload: interruptValue.payload } : {}),
     };
 
     // Persist the pending confirmation so it survives page refresh.

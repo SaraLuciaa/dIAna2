@@ -11,6 +11,21 @@ export async function getProfile(db: DbClient, userId: string) {
   return data as Profile;
 }
 
+export async function setDefaultGoogleCalendarId(
+  db: DbClient,
+  userId: string,
+  calendarId: string | null
+) {
+  const { error } = await db
+    .from("profiles")
+    .update({
+      default_google_calendar_id: calendarId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", userId);
+  if (error) throw error;
+}
+
 export async function upsertProfile(
   db: DbClient,
   userId: string,
